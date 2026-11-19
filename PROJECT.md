@@ -52,4 +52,4 @@ $env:SONAR_TOKEN=[System.Net.NetworkCredential]::new('',(Read-Host 'SonarQube pr
 sonar-scanner
 ```
 
-CI can also run the scanner when the repository variable `SONAR_HOST_URL` and secret `SONAR_TOKEN` are configured for a reachable server. The app requires no SonarQube credentials to run.
+Branch builds start a temporary SonarQube Community server and publish the completed analysis metrics in the GitHub Actions job summary. To retain analysis history, the scanner can use an external server when the repository variable `SONAR_HOST_URL` and secret `SONAR_TOKEN` are configured for a reachable server. The app requires no SonarQube credentials to run.

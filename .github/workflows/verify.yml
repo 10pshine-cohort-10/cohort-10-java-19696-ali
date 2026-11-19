@@ -51,9 +51,50 @@ jobs:
           export SPRING_SQL_INIT_MODE=always SPRING_SQL_INIT_SCHEMA_LOCATIONS=classpath:schema-sqlserver.sql
           export SPRING_JPA_HIBERNATE_DDL_AUTO=validate
           mvn -B -Dtest=ApplicationFlowTest,ContactRepositoryTest test
+      - name: Start a temporary SonarQube server
+        if: github.event_name != 'pull_request' && vars.SONAR_HOST_URL == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          url=http://127.0.0.1:9000
+          docker run -d --name contact-sonar -p 127.0.0.1:9000:9000 sonarqube:community
+          for attempt in {1..100}; do
+            if curl -fsS "$url/api/system/status" 2>/dev/null | jq -e '.status == "UP"' >/dev/null; then break; fi
+            sleep 3
+          done
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          curl -fsS -u admin:admin -X POST "$url/api/users/change_password" \
+            -d login=admin -d previousPassword=admin --data-urlencode "password=$password"
+          token=$(curl -fsS -u "admin:$password" -X POST "$url/api/user_tokens/generate" \
+            -d name=contact-book-ci | jq -er '.token')
+          echo "::add-mask::$token"
+          echo "LOCAL_SONAR_TOKEN=$token" >> "$GITHUB_ENV"
       - name: Analyze Java and JavaScript
-        if: github.event_name != 'pull_request' && vars.SONAR_HOST_URL != ''
+        if: github.event_name != 'pull_request'
         uses: SonarSource/sonarqube-scan-action@v6
         env:
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL || 'http://127.0.0.1:9000' }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN || env.LOCAL_SONAR_TOKEN }}
+      - name: Record the completed analysis
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL || 'http://127.0.0.1:9000' }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN || env.LOCAL_SONAR_TOKEN }}
+        run: |
+          set -euo pipefail
+          task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
+          for attempt in {1..80}; do
+            result=$(curl -fsS -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/ce/task?id=$task")
+            status=$(jq -r '.task.status' <<< "$result")
+            case "$status" in
+              SUCCESS) break ;;
+              FAILED|CANCELED) echo "SonarQube analysis $status"; exit 1 ;;
+            esac
+            sleep 3
+          done
+          test "$status" = SUCCESS
+          curl -fsS -u "$SONAR_TOKEN:" --get "$SONAR_HOST_URL/api/measures/component" \
+            -d component=cohort-10-java-19696-ali -d metricKeys=bugs,vulnerabilities,code_smells,coverage,ncloc \
+            | jq -r '.component.measures[] | "- " + .metric + " = " + .value' >> "$GITHUB_STEP_SUMMARY"
