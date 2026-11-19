@@ -11,15 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -62,9 +62,9 @@ jobs:
             if curl -fsS "$url/api/system/status" 2>/dev/null | jq -e '.status == "UP"' >/dev/null; then break; fi
             sleep 3
           done
-          password=$(openssl rand -hex 24)
+          password="Az9!$(openssl rand -hex 24)"
           echo "::add-mask::$password"
-          curl -fsS -u admin:admin -X POST "$url/api/users/change_password" \
+          curl --fail-with-body -sS -u admin:admin -X POST "$url/api/users/change_password" \
             -d login=admin -d previousPassword=admin --data-urlencode "password=$password"
           token=$(curl -fsS -u "admin:$password" -X POST "$url/api/user_tokens/generate" \
             -d name=contact-book-ci | jq -er '.token')
